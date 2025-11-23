@@ -1,11 +1,12 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require = ('socket.io');
+// FIX: Corrected the typo (require = was changed to require)
+const { Server } = require('socket.io'); 
 const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs'); 
-const jwt = require('jsonwebtoken'); // JWT for session persistence
+const jwt = require('jsonwebtoken'); 
 
 // Import our Models (Ensure models.js is in the same directory)
 const { User, Message, Conversation } = require('./models');
