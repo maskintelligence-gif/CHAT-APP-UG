@@ -1,13 +1,21 @@
 {
   "name": "whatsapp-clone-server",
   "version": "1.0.0",
-  "description": "A Node.js and Socket.IO Chat Application",
+  "description": "A Node.js and Socket.IO Chat Application with JWT Auth",
   "main": "server.js",
   "scripts": {
-    // ⬇️ ADD THIS LINE ⬇️
-    "start": "node server.js", 
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [
+    "chat",
+    "socket.io",
+    "node",
+    "express",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "express": "^4.18.2",
