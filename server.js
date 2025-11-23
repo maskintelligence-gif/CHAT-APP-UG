@@ -1,24 +1,34 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
+const { Server } = require = ('socket.io');
 const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs'); 
+const jwt = require('jsonwebtoken'); // JWT for session persistence
 
 // Import our Models (Ensure models.js is in the same directory)
 const { User, Message, Conversation } = require('./models');
 
 const app = express();
 const server = http.createServer(app);
+
+// CORS Configuration: Allow all origins (*) for deployment flexibility
 const io = new Server(server, { 
     maxHttpBufferSize: 1e7, 
-    cors: { origin: "*" } 
+    cors: { 
+        origin: "*", 
+        methods: ["GET", "POST"]
+    } 
 });
 
 // --- CONFIGURATION ---
-const PORT = 3000;
-const MONGO_URI = 'mongodb://127.0.0.1:27017/whatsapp_clone'; 
+// Use PORT from environment (e.g., Render) or default to 3000 locally
+const PORT = process.env.PORT || 3000; 
+// Use MONGO_URI from environment (e.g., MongoDB Atlas) or default to local
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/whatsapp_clone'; 
+// WARNING: CHANGE THIS SECRET KEY TO A LONG, RANDOM VALUE FOR PRODUCTION!
+const JWT_SECRET = 'your_super_secret_key_8494940292'; 
 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
@@ -54,7 +64,7 @@ async function sendUnreadCounts(userId) {
             });
             
             if (unreadCount > 0) {
-                // Find the ID of the other participant for the client-side UI to know where to put the badge
+                // Find the ID of the other participant for the client-side UI
                 const targetUserId = convo.participants.find(pId => pId.toString() !== userId).toString();
                 
                 unreadUpdates.push({
@@ -93,7 +103,7 @@ async function broadcastActiveUsers() {
 io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // 1. Authentication Handlers
+    // 1. Authentication Handlers (Manual Sign-up)
     socket.on('signup', async ({ username, password }) => {
         try {
             const existingUser = await User.findOne({ username });
@@ -105,9 +115,13 @@ io.on('connection', (socket) => {
             const newUser = await User.create({
                 username, password: hashedPassword, isOnline: true, socketId: socket.id
             });
+            
+            // Generate JWT
+            const token = jwt.sign({ userId: newUser._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
+
             socket.userId = newUser._id.toString();
             socket.username = newUser.username;
-            socket.emit('registration_success', { myId: newUser._id.toString() });
+            socket.emit('registration_success', { myId: newUser._id.toString(), token }); 
             broadcastActiveUsers();
         } catch (err) {
             console.error(err);
@@ -115,6 +129,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // 1. Authentication Handlers (Manual Login)
     socket.on('login', async ({ username, password }) => {
         try {
             const user = await User.findOne({ username });
@@ -127,13 +142,18 @@ io.on('connection', (socket) => {
                 socket.emit('auth_error', 'Incorrect password');
                 return;
             }
-            // CRITICAL: Update socketId on login/reconnect
+            
+            // CRITICAL: Update socketId and status on login/reconnect
             user.isOnline = true;
             user.socketId = socket.id;
             await user.save(); 
+            
+            // Generate JWT
+            const token = jwt.sign({ userId: user._id.toString() }, JWT_SECRET, { expiresIn: '7d' });
+
             socket.userId = user._id.toString();
             socket.username = user.username;
-            socket.emit('registration_success', { myId: user._id.toString() });
+            socket.emit('registration_success', { myId: user._id.toString(), token }); 
             broadcastActiveUsers();
             sendUnreadCounts(user._id.toString()); 
         } catch (err) {
@@ -141,7 +161,38 @@ io.on('connection', (socket) => {
             socket.emit('auth_error', 'Login failed');
         }
     });
+    
+    // 1. Authentication Handlers (Automatic Re-authentication)
+    socket.on('auto_auth', async ({ token }) => {
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            const user = await User.findById(decoded.userId);
 
+            if (!user) {
+                socket.emit('auth_error', 'Session expired. Please log in.');
+                return;
+            }
+
+            // Restore user session properties
+            user.isOnline = true;
+            user.socketId = socket.id;
+            await user.save(); 
+
+            socket.userId = user._id.toString();
+            socket.username = user.username;
+            
+            // Re-send the token to refresh expiry/keep it client-side
+            socket.emit('registration_success', { myId: user._id.toString(), token }); 
+            
+            broadcastActiveUsers();
+            sendUnreadCounts(user._id.toString());
+
+        } catch (err) {
+            console.error("JWT Auth failed:", err.message);
+            socket.emit('auth_error', 'Session expired. Please log in again.');
+        }
+    });
+    
     // Request to refresh the active users list (used after notifications)
     socket.on('get_current_active_users', broadcastActiveUsers); 
 
@@ -150,10 +201,7 @@ io.on('connection', (socket) => {
         try {
             const myId = socket.userId;
             
-            if (!myId) {
-                console.error("ERROR: socket.userId is missing. User is not authenticated.");
-                return;
-            }
+            if (!myId) return;
 
             let conversation = await Conversation.findOne({
                 participants: { $all: [myId, targetUserId] }
@@ -197,7 +245,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 3. SEND MESSAGE (Persist to DB) - FINAL VERSION
+    // 3. SEND MESSAGE (Persist to DB) 
     socket.on('send_private_message', async (payload) => {
         try {
             const { roomId, content, fileData, fileName } = payload;
@@ -262,9 +310,6 @@ io.on('connection', (socket) => {
                         senderId: socket.userId,
                         senderName: socket.username
                     });
-                    console.log(`Notification sent successfully to ${recipientUser.username}.`);
-                } else {
-                    console.warn(`Recipient ${recipientUser.username} is logged in but socket ${recipientUser.socketId} is not currently connected.`);
                 }
             }
 
@@ -324,13 +369,13 @@ io.on('connection', (socket) => {
     // 6. DISCONNECT
     socket.on('disconnect', async () => {
         if (socket.userId) {
-            // Set user to offline when disconnecting
             await User.findByIdAndUpdate(socket.userId, { isOnline: false, socketId: null });
             broadcastActiveUsers();
         }
     });
 });
 
+// Listen on the environment port provided by the hosting service
 server.listen(PORT, () => {
-    console.log(`🔒 Secure, Persistent Chat Server running on http://localhost:${PORT}`);
+    console.log(`🔒 Secure, Persistent Chat Server running on port ${PORT}`);
 });
