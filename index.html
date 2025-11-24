@@ -36,8 +36,8 @@
     </div>
 
     <script>
-        // 🚨 CRITICAL: REPLACE THIS URL WITH YOUR ACTUAL PUBLIC RENDER URL
-        const RENDER_SERVER_URL = "https://my-chat-app-service.onrender.com"; 
+        // ✅ IMPLEMENTED LIVE RENDER URL
+        const RENDER_SERVER_URL = "https://chat-app-ug-2.onrender.com"; 
 
         // Initialize Socket.IO connection
         const socket = io(RENDER_SERVER_URL, { withCredentials: true });
@@ -50,7 +50,6 @@
         // --- Socket Event Handlers ---
         socket.on('connect', () => {
             console.log('Connected to server!');
-            // Attempt auto-authentication if token exists
             if (authToken) {
                 socket.emit('auto_auth', { token: authToken });
             }
@@ -107,17 +106,15 @@
 
         socket.on('unread_updates', (updates) => {
             console.log('Unread updates received:', updates);
-            // In a full UI, you would update the user list badges here based on the updates array
         });
         
         socket.on('messages_read_update', (data) => {
-            // Update UI to show blue ticks for messages read by data.readerId
             console.log('Read update received:', data);
         });
         
         socket.on('message_received_notification', (data) => {
             console.log(`Notification: New message from ${data.senderName}. Refreshing user list.`);
-            socket.emit('get_current_active_users'); // Refresh list to update badge
+            socket.emit('get_current_active_users'); 
         });
 
 
@@ -155,19 +152,16 @@
             const p = document.createElement('p');
             const senderName = message.senderId === myId ? 'Me' : message.senderName;
             
-            // Simple display for text or file
             let messageContent = message.content;
             if (message.type === 'file' && message.fileUrl) {
-                // If you host the client on Render, the file URL should work automatically
                 messageContent = `<a href="${message.fileUrl}" target="_blank">[File: ${message.content}]</a>`;
             }
 
             p.innerHTML = `${senderName}: ${messageContent}`;
             
-            // Basic Read Status Indicator
             if (message.senderId === myId) {
                 const isRead = message.readBy && message.readBy.length > 1;
-                const ticks = isRead ? '✅✅' : '✅'; // Crude representation of blue ticks
+                const ticks = isRead ? '✅✅' : '✅'; 
                 p.innerHTML += ` <span style="font-size: 0.8em; color: ${isRead ? 'blue' : 'gray'};">${ticks}</span>`;
             }
             
