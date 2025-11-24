@@ -1,236 +1,180 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Clone</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/socket.io/socket.io.js"></script>
+    <title>Realtime Chat App</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
-        /* Custom styles remain the same */
-        .message-container::-webkit-scrollbar { width: 5px; }
-        .message-container::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .message-container { scroll-behavior: smooth; }
-        .message-bubble { 
-            max-width: 80%;
-            padding: 8px 12px;
-            border-radius: 15px;
-            word-wrap: break-word;
-        }
-        .message-bubble.self { border-bottom-right-radius: 2px; }
-        .message-bubble.other { border-bottom-left-radius: 2px; }
-        #file-input { display: none; }
+        body { font-family: Arial, sans-serif; }
+        #auth-container, #chat-container { margin: 20px; padding: 20px; border: 1px solid #ccc; }
+        #messages { height: 300px; overflow-y: scroll; border: 1px solid #eee; padding: 10px; }
+        #users { width: 150px; float: left; border: 1px solid #000; padding: 10px; margin-right: 20px; }
+        .online { color: green; font-weight: bold; cursor: pointer; }
     </style>
 </head>
-<body class="bg-gray-50 flex h-screen antialiased text-gray-800">
+<body>
 
-    <div id="auth-modal" class="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center">
-        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm">
-            <h2 class="text-3xl font-bold mb-6 text-center text-indigo-600">Secure Login</h2>
-            <form id="auth-form" class="space-y-4">
-                <div>
-                    <label for="username-input" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                    <input type="text" id="username-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. Alice" required>
-                </div>
-                
-                <div>
-                    <label for="password-input" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                    <input type="password" id="password-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" placeholder="••••••••" required>
-                </div>
+    <div id="auth-container">
+        <h2>Authentication</h2>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="password" placeholder="Password">
+        <button onclick="signup()">Sign Up</button>
+        <button onclick="login()">Log In</button>
+        <p id="auth-status"></p>
+    </div>
 
-                <div class="flex space-x-3 pt-4">
-                    <button type="button" id="login-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition duration-200">
-                        Login
-                    </button>
-                    <button type="button" id="signup-btn" class="flex-1 bg-white border border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-bold py-3 rounded-lg transition duration-200">
-                        Sign Up
-                    </button>
-                </div>
-            </form>
-            <p id="auth-error" class="text-red-500 mt-4 text-sm text-center hidden font-medium"></p>
-        </div>
+    <div id="users">
+        <h3>Active Users</h3>
+        <ul id="active-users-list"></ul>
     </div>
-    
-    <div class="flex h-full w-full max-w-7xl mx-auto shadow-xl rounded-lg overflow-hidden bg-white">
-        <div id="user-sidebar" class="w-full md:w-80 flex-shrink-0 bg-gray-50 border-r border-gray-200">
-            </div>
-        
-        <div id="chat-panel" class="hidden w-full md:flex flex-col flex-auto">
-            </div>
+
+    <div id="chat-container" style="display:none;">
+        <h2 id="chat-header"></h2>
+        <div id="messages"></div>
+        <input type="text" id="message-input" placeholder="Type a message...">
+        <button onclick="sendMessage()">Send</button>
     </div>
-    
+
     <script>
-        // Global State Variables
-        let socket;
-        let myUserId = null;
+        // 🚨 CRITICAL: REPLACE THIS URL WITH YOUR ACTUAL PUBLIC RENDER URL
+        const RENDER_SERVER_URL = "https://my-chat-app-service.onrender.com"; 
+
+        // Initialize Socket.IO connection
+        const socket = io(RENDER_SERVER_URL, { withCredentials: true });
+
+        let myId = null;
         let currentRoomId = null;
-        let targetUserId = null;
-        let typingTimeout;
-        const typingUsers = {};
-        const unreadCounts = {}; 
+        let targetUser = null;
+        let authToken = localStorage.getItem('authToken');
 
-        // DOM Elements
-        const authModal = document.getElementById('auth-modal');
-        const usernameInput = document.getElementById('username-input');
-        const passwordInput = document.getElementById('password-input');
-        const loginBtn = document.getElementById('login-btn');
-        const signupBtn = document.getElementById('signup-btn');
-        const authError = document.getElementById('auth-error');
-        const currentUserDisplay = document.getElementById('current-user-display');
-        const userList = document.getElementById('user-list');
-        const userCount = document.getElementById('user-count');
-        const chatHeader = document.getElementById('chat-header');
-        const targetUsernameDisplay = document.getElementById('target-username-display');
-        const messagesContainer = document.getElementById('messages-container');
-        const messageFormContainer = document.getElementById('message-form-container');
-        const messageInput = document.getElementById('message-input');
-        const fileInput = document.getElementById('file-input');
-        const fileBtn = document.getElementById('file-btn');
-        const noChatSelected = document.getElementById('no-chat-selected');
-        const typingIndicator = document.getElementById('typing-indicator');
-        const userSidebar = document.getElementById('user-sidebar'); 
-        const chatPanel = document.getElementById('chat-panel');     
-        const backBtn = document.getElementById('back-btn');         
+        // --- Socket Event Handlers ---
+        socket.on('connect', () => {
+            console.log('Connected to server!');
+            // Attempt auto-authentication if token exists
+            if (authToken) {
+                socket.emit('auto_auth', { token: authToken });
+            }
+        });
 
-        // --- UTILITY FUNCTIONS ---
-        function escapeHtml(str) { /* ... same logic ... */ }
-        function updateTypingIndicator() { /* ... same logic ... */ }
-        function renderMessage(message, isSelf) { /* ... same logic ... */ }
-        function updateActiveUsers(users) { /* ... same logic ... */ }
-        
-        // --- SOCKET EVENT HANDLERS ---
-        function setupSocket(serverUrl) {
-            // CRITICAL: Connect to the specified external server URL
-            socket = io(serverUrl); 
+        socket.on('registration_success', (data) => {
+            myId = data.myId;
+            authToken = data.token;
+            localStorage.setItem('authToken', authToken);
+            document.getElementById('auth-container').style.display = 'none';
+            document.getElementById('chat-container').style.display = 'block';
+            document.getElementById('auth-status').textContent = 'Successfully logged in!';
+        });
 
-            socket.on('registration_success', (data) => {
-                myUserId = data.myId;
-                
-                // NEW: Store the received token for auto-login
-                if (data.token) {
-                    localStorage.setItem('chatToken', data.token);
+        socket.on('auth_error', (message) => {
+            document.getElementById('auth-status').textContent = `Error: ${message}`;
+            localStorage.removeItem('authToken');
+            document.getElementById('auth-container').style.display = 'block';
+            document.getElementById('chat-container').style.display = 'none';
+        });
+
+        socket.on('active_users', (users) => {
+            const list = document.getElementById('active-users-list');
+            list.innerHTML = '';
+            users.forEach(user => {
+                if (user.id !== myId) {
+                    const li = document.createElement('li');
+                    li.textContent = user.username;
+                    li.classList.add('online');
+                    li.onclick = () => joinChat(user.id, user.username);
+                    list.appendChild(li);
                 }
-
-                authModal.classList.add('hidden');
-                const username = usernameInput.value || (data.myId === myUserId ? currentUserDisplay.textContent.replace('Logged in as: ', '') : 'User');
-                currentUserDisplay.textContent = `Logged in as: ${username}`;
-                authError.classList.add('hidden');
             });
+        });
 
-            socket.on('auth_error', (msg) => {
-                authError.textContent = msg;
-                authError.classList.remove('hidden');
-                // NEW: Clear stored token on session expiry/failure
-                localStorage.removeItem('chatToken'); 
-            });
+        socket.on('chat_room_loaded', (data) => {
+            currentRoomId = data.roomId;
+            targetUser = data.targetUser;
+            document.getElementById('chat-header').textContent = `Chatting with: ${targetUser.username}`;
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML = ''; 
+            data.history.forEach(addMessageToUI);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
             
-            socket.on('active_users', updateActiveUsers);
+            socket.emit('mark_messages_read', { roomId: currentRoomId });
+        });
 
-            socket.on('unread_updates', (updates) => {
-                Object.keys(unreadCounts).forEach(key => delete unreadCounts[key]);
-                updates.forEach(update => {
-                    unreadCounts[update.targetUserId] = update.count;
-                });
-                socket.emit('get_current_active_users'); 
-            });
-
-            // Receive notification when a message arrives while on the user list
-            socket.on('message_received_notification', (data) => {
-                console.log(`Notification: New message received from ${data.senderName}. Refreshing UI.`);
-                socket.emit('get_current_active_users'); 
-            });
-
-
-            socket.on('chat_room_loaded', (data) => {
-                currentRoomId = data.roomId;
-                targetUserId = data.targetUser.id;
-                
-                // Show chat panel and hide placeholder
-                chatHeader.classList.remove('hidden');
-                messageFormContainer.classList.remove('hidden');
-                noChatSelected.classList.add('hidden');
-                targetUsernameDisplay.textContent = escapeHtml(data.targetUser.username);
-                
-                // Clear and render history
-                messagesContainer.innerHTML = '';
-                data.history.forEach(message => {
-                    renderMessage(message, message.senderId === myUserId);
-                });
-                
+        socket.on('new_message', (message) => {
+            addMessageToUI(message);
+            if (message.roomId === currentRoomId) {
                 socket.emit('mark_messages_read', { roomId: currentRoomId });
-                
-                delete unreadCounts[targetUserId];
-                socket.emit('get_current_active_users'); 
-            });
+            }
+        });
 
-            socket.on('new_message', (message) => {
-                if (message.roomId === currentRoomId) {
-                    renderMessage(message, message.senderId === myUserId);
-                    if (message.senderId !== myUserId) {
-                        socket.emit('mark_messages_read', { roomId: currentRoomId });
-                    }
-                }
-            });
-            
-            socket.on('messages_read_update', (data) => {
-                if (currentRoomId === data.roomId && data.readerId === targetUserId) {
-                    const ticks = document.querySelectorAll('.self span.text-gray-400'); 
-                    ticks.forEach(tick => {
-                        tick.className = 'text-blue-500 text-xs ml-1'; 
-                    });
-                }
-            });
+        socket.on('unread_updates', (updates) => {
+            console.log('Unread updates received:', updates);
+            // In a full UI, you would update the user list badges here based on the updates array
+        });
+        
+        socket.on('messages_read_update', (data) => {
+            // Update UI to show blue ticks for messages read by data.readerId
+            console.log('Read update received:', data);
+        });
+        
+        socket.on('message_received_notification', (data) => {
+            console.log(`Notification: New message from ${data.senderName}. Refreshing user list.`);
+            socket.emit('get_current_active_users'); // Refresh list to update badge
+        });
 
-            socket.on('typing_status', (data) => { /* ... same logic ... */ });
+
+        // --- Client Functions ---
+        function signup() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            socket.emit('signup', { username, password });
         }
 
-        // --- MAIN APP LOGIC ---
-        function startPrivateChat(userId, username) { /* ... same logic ... */ }
-        function goBackToUsers() { /* ... same logic ... */ }
-        async function submitMessage(content, file) { /* ... same logic ... */ }
+        function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            socket.emit('login', { username, password });
+        }
 
-        // --- EVENT LISTENERS ---
-        loginBtn.addEventListener('click', () => {
-            const username = usernameInput.value.trim();
-            const password = passwordInput.value.trim();
-            if(username && password) {
-                socket.emit('login', { username, password });
-            }
-        });
+        function joinChat(userId, username) {
+            socket.emit('join_private_chat', { targetUserId: userId });
+        }
 
-        signupBtn.addEventListener('click', () => {
-            const username = usernameInput.value.trim();
-            const password = passwordInput.value.trim();
-            if(username && password) {
-                socket.emit('signup', { username, password });
-            }
-        });
-        
-        // ... (other event listeners remain the same) ...
-        
-        // CRITICAL: AUTO-AUTHENTICATION LOGIC
-        function checkAutoAuth() {
-            const token = localStorage.getItem('chatToken');
-            
-            // 🚨 IMPORTANT: REPLACE 'YOUR_RENDER_URL' with your actual deployed URL (e.g., https://my-chat-app.onrender.com)
-            const serverUrl = 'YOUR_RENDER_URL'; 
-            
-            if (token && serverUrl !== 'YOUR_RENDER_URL') {
-                setupSocket(serverUrl); 
-                socket.on('connect', () => {
-                    console.log("Found token, attempting auto-reconnect...");
-                    socket.emit('auto_auth', { token: token });
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const content = input.value;
+            if (content.trim() && currentRoomId) {
+                socket.emit('send_private_message', { 
+                    roomId: currentRoomId, 
+                    content: content 
                 });
-            } else {
-                // If no token or if the URL is still placeholder, show the modal
-                authModal.classList.remove('hidden');
-                // We still need to call setupSocket so manual login/signup works.
-                setupSocket(serverUrl === 'YOUR_RENDER_URL' ? undefined : serverUrl); 
+                input.value = '';
             }
         }
-
-        checkAutoAuth(); 
         
+        function addMessageToUI(message) {
+            const messagesDiv = document.getElementById('messages');
+            const p = document.createElement('p');
+            const senderName = message.senderId === myId ? 'Me' : message.senderName;
+            
+            // Simple display for text or file
+            let messageContent = message.content;
+            if (message.type === 'file' && message.fileUrl) {
+                // If you host the client on Render, the file URL should work automatically
+                messageContent = `<a href="${message.fileUrl}" target="_blank">[File: ${message.content}]</a>`;
+            }
+
+            p.innerHTML = `${senderName}: ${messageContent}`;
+            
+            // Basic Read Status Indicator
+            if (message.senderId === myId) {
+                const isRead = message.readBy && message.readBy.length > 1;
+                const ticks = isRead ? '✅✅' : '✅'; // Crude representation of blue ticks
+                p.innerHTML += ` <span style="font-size: 0.8em; color: ${isRead ? 'blue' : 'gray'};">${ticks}</span>`;
+            }
+            
+            messagesDiv.appendChild(p);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
     </script>
 </body>
 </html>
