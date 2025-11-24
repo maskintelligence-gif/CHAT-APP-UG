@@ -1,37 +1,35 @@
 const mongoose = require('mongoose');
 
 // --- 1. User Schema ---
-// Defines the structure for user accounts (needed for login/signup).
 const userSchema = new mongoose.Schema({
   username: { 
     type: String, 
     required: true, 
-    unique: true // Ensures no two users share the same username
+    unique: true 
   },
   password: { 
     type: String, 
-    required: true // Stores the bcrypt HASH of the password
+    required: true 
   }, 
   isOnline: { 
     type: Boolean, 
-    default: false // Tracks online status for the active user list
+    default: false 
   },
   socketId: { 
-    type: String // Maps the persistent user ID to the current live socket connection
+    type: String 
   }
 });
 
 // --- 2. Message Schema ---
-// Defines the structure for a single message instance.
 const messageSchema = new mongoose.Schema({
   conversationId: { 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Conversation', // Links the message to its specific chat room
+    ref: 'Conversation', 
     required: true
   },
   sender: { 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', // Links the message to the user who sent it
+    ref: 'User', 
     required: true
   },
   content: { 
@@ -40,32 +38,31 @@ const messageSchema = new mongoose.Schema({
   type: { 
     type: String, 
     enum: ['text', 'file'], 
-    default: 'text' // Supports text and file payloads
+    default: 'text' 
   },
   fileUrl: { 
-    type: String // URL for uploaded files
+    type: String 
   },
   readBy: [{ 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User' // Array of user IDs who have read this message (The Blue Tick logic)
+    ref: 'User' 
   }]
 }, { 
-    timestamps: true // Automatically adds createdAt and updatedAt fields
+    timestamps: true 
 });
 
 // --- 3. Conversation Schema ---
-// Defines the structure for a chat room (can be 1:1 or group, though currently used for 1:1).
 const conversationSchema = new mongoose.Schema({
   participants: [{ 
     type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User' // Array of users in this chat
+    ref: 'User' 
   }],
   lastMessage: { 
-    type: String // Used for displaying a preview in the sidebar
+    type: String 
   },
   lastMessageTime: { 
     type: Date, 
-    default: Date.now // Used for sorting conversations in the sidebar
+    default: Date.now 
   }
 });
 
